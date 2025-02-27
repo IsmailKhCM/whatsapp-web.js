@@ -449,14 +449,12 @@ exports.LoadUtils = () => {
     };
 
     window.WWebJS.getChatModel = async chat => {
-
         let res = chat.serialize();
-        res.isGroup = false;
+        res.isGroup = chat.id.server === 'g.us';
         res.formattedTitle = chat.formattedTitle;
         res.isMuted = chat.muteExpiration == 0 ? false : true;
 
         if (chat.groupMetadata) {
-            res.isGroup = true;
             const chatWid = window.Store.WidFactory.createWid((chat.id._serialized));
             await window.Store.GroupMetadata.update(chatWid);
             res.groupMetadata = chat.groupMetadata.serialize();
@@ -501,8 +499,7 @@ exports.LoadUtils = () => {
         }
 
         // TODO: remove useOldImplementation and its checks once all clients are updated to >= v2.2327.4
-        const useOldImplementation
-            = window.compareWwebVersions(window.Debug.VERSION, '<', '2.2327.4');
+        const useOldImplementation = window.compareWwebVersions(window.Debug.VERSION, '<', '2.2327.4');
 
         res.isMe = useOldImplementation
             ? contact.isMe
@@ -510,9 +507,7 @@ exports.LoadUtils = () => {
         res.isUser = useOldImplementation
             ? contact.isUser
             : window.Store.ContactMethods.getIsUser(contact);
-        res.isGroup = useOldImplementation
-            ? contact.isGroup
-            : window.Store.ContactMethods.getIsGroup(contact);
+        res.isGroup = contact.id.server === 'g.us';  // Use server type to determine group status
         res.isWAContact = useOldImplementation
             ? contact.isWAContact
             : window.Store.ContactMethods.getIsWAContact(contact);
