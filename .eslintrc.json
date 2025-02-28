@@ -32,5 +32,19 @@
             "error",
             "always"
         ]
-    }
+    },
+    "overrides": [
+        {
+            "files": ["examples/human_handoff.js"],
+            "rules": {
+                "no-unused-vars": "off"
+            }
+        },
+        {
+            "files": ["src/structures/storage/ThreadStorage.js"],
+            "rules": {
+                "no-unused-vars": "off"
+            }
+        }
+    ]
 }
