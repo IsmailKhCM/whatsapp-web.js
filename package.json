@@ -4,6 +4,11 @@
   "description": "Enhanced WhatsApp Web API client with improved stability and features",
   "main": "./index.js",
   "typings": "./index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "src/**/*"
+  ],
   "scripts": {
     "test": "mocha tests --recursive --timeout 5000",
     "test:specific": "mocha",

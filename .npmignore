@@ -1,8 +1,28 @@
-docs/*
-.github/*
-
+# Exclude development files
+.git
+.github
+.vscode
 .eslintrc.json
+.gitignore
 .jsdoc.json
+.mocharc.json
+
+# Exclude test files
+tests/
+test-*.js
+
+# Exclude documentation source
+docs-source/
+
+# Include all source files
+!src/
+!src/structures/
+!src/structures/AIAssistant.js
+!src/structures/Thread.js
+!src/structures/TemplateParser.js
+!src/structures/providers/
+!src/structures/storage/
+
 .editorconfig
 
 logs
@@ -17,4 +37,3 @@ yarn-error.log*
 
 .env
 tools/
-tests/
