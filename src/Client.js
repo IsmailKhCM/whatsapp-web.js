@@ -18,6 +18,8 @@ const WebCacheFactory = require('./webCache/WebCacheFactory');
 const { ClientInfo, Message, MessageMedia, Contact, Location, Poll, PollVote, GroupNotification, Label, Call, Buttons, List, Reaction, Broadcast} = require('./structures');
 const NoAuth = require('./authStrategies/NoAuth');
 const {exposeFunctionIfAbsent} = require('./util/Puppeteer');
+const AIAssistant = require('./structures/AIAssistant');
+const TemplateParser = require('./structures/TemplateParser');
 
 /**
  * Starting point for interacting with the WhatsApp Web API
@@ -37,6 +39,15 @@ const {exposeFunctionIfAbsent} = require('./util/Puppeteer');
  * @param {string} options.ffmpegPath - Ffmpeg path to use when formatting videos to webp while sending stickers 
  * @param {boolean} options.bypassCSP - Sets bypassing of page's Content-Security-Policy.
  * @param {object} options.proxyAuthentication - Proxy Authentication object.
+ * @param {object} options.ai - AI assistant configuration
+ * @param {boolean} options.ai.enabled - Whether to enable the AI assistant
+ * @param {string} options.ai.provider - AI provider to use
+ * @param {string} options.ai.apiKey - API key for the AI provider
+ * @param {string} options.ai.defaultModel - Default model to use
+ * @param {object} options.ai.storageOptions - Storage options for AI threads
+ * @param {object} options.templateParser - Template parser configuration
+ * @param {boolean} options.templateParser.enabled - Whether to enable the template parser
+ * @param {object} options.templateParser.defaultTemplates - Default templates to add
  * 
  * @fires Client#qr
  * @fires Client#authenticated
@@ -66,27 +77,53 @@ class Client extends EventEmitter {
 
         this.options = Util.mergeDefault(DefaultOptions, options);
         
-        if(!this.options.authStrategy) {
-            this.authStrategy = new NoAuth();
+        if (!this.options.authStrategy) {
+            if (Object.prototype.hasOwnProperty.call(this.options, 'session')) {
+                process.emitWarning(
+                    'options.session is deprecated and will be removed in a future release due to incompatibility with multi-device. ' +
+                    'Use the LocalAuth authStrategy, don\'t pass in a session as an option, or suppress this warning by using the LegacySessionAuth strategy explicitly (see https://wwebjs.dev/guide/authentication.html)',
+                    'DeprecationWarning'
+                );
+                const LegacySessionAuth = require('./authStrategies/LegacySessionAuth');
+                this.authStrategy = new LegacySessionAuth({
+                    session: this.options.session,
+                    restartOnAuthFail: this.options.restartOnAuthFail
+                });
+            } else {
+                this.authStrategy = new NoAuth();
+            }
         } else {
             this.authStrategy = this.options.authStrategy;
         }
 
         this.authStrategy.setup(this);
 
-        /**
-         * @type {puppeteer.Browser}
-         */
         this.pupBrowser = null;
-        /**
-         * @type {puppeteer.Page}
-         */
         this.pupPage = null;
 
-        this.currentIndexHtml = null;
-        this.lastLoggedOut = false;
-
         Util.setFfmpegPath(this.options.ffmpegPath);
+        
+        /**
+         * AI assistant
+         * @type {AIAssistant}
+         */
+        this.ai = null;
+
+        /**
+         * Template parser
+         * @type {TemplateParser}
+         */
+        this.templateParser = null;
+
+        // Initialize AI if enabled
+        if (options.ai && options.ai.enabled !== false) {
+            this.ai = new AIAssistant(this, options.ai);
+        }
+
+        // Initialize template parser if enabled
+        if (options.templateParser && options.templateParser.enabled !== false) {
+            this.templateParser = new TemplateParser(this, options.templateParser);
+        }
     }
     /**
      * Injection logic
@@ -1792,6 +1829,151 @@ class Client extends EventEmitter {
                 return originalAddHandler.call(this, event, handler);
             };
         });
+    }
+
+    /**
+     * Process a message using templates and/or AI
+     * @param {string} message - Message to process
+     * @param {Object} options - Processing options
+     * @param {string[]} [options.templates] - Template names to try
+     * @param {boolean} [options.fallbackToAI=false] - Whether to fall back to AI if no template matches
+     * @param {Object} [options.aiOptions] - Options for AI processing
+     * @param {boolean} [options.handoffOnError=false] - Whether to hand off to human on error
+     * @param {boolean} [options.checkHandoffState=true] - Whether to check handoff state
+     * @returns {Promise<Object>} Processing result
+     */
+    async processMessage(message, options = {}) {
+        // Ensure we have a template parser
+        if (!this.templateParser && options.templates) {
+            throw new Error('Template parser is not initialized');
+        }
+
+        // Ensure we have an AI assistant
+        if (!this.ai && options.fallbackToAI) {
+            throw new Error('AI assistant is not initialized');
+        }
+
+        // Extract chat ID from options
+        const chatId = options.chatId || 'system';
+
+        // Check handoff state if enabled
+        if (options.checkHandoffState !== false && this.ai) {
+            if (this.ai.isInHumanMode(chatId)) {
+                // If in human mode, delegate to AI assistant's processMessage
+                return await this.ai.processMessage(chatId, message, options);
+            }
+        }
+
+        // Try to parse with templates
+        if (options.templates && options.templates.length > 0) {
+            for (const templateName of options.templates) {
+                const parsed = this.templateParser.parseMessage(message, templateName);
+                if (parsed.isValid) {
+                    return {
+                        type: 'template',
+                        template: templateName,
+                        data: parsed
+                    };
+                }
+            }
+        }
+
+        // Check for handoff commands
+        if (this.ai && (
+            message.toLowerCase().includes('#handoff') || 
+            message.toLowerCase().includes('#human') || 
+            message.toLowerCase().includes('#agent')
+        )) {
+            return await this.ai.processMessage(chatId, message, options);
+        }
+
+        // Fall back to AI if enabled
+        if (options.fallbackToAI && this.ai) {
+            try {
+                const result = await this.ai.processMessage(chatId, message, options);
+                return result;
+            } catch (error) {
+                if (options.handoffOnError) {
+                    // Attempt handoff on error
+                    return await this.ai.processMessage(chatId, message, {
+                        ...options,
+                        handoffOnError: true
+                    });
+                }
+                throw error;
+            }
+        }
+
+        // No match
+        return {
+            type: 'unmatched',
+            message
+        };
+    }
+
+    /**
+     * Hand off a conversation to a human operator
+     * @param {string} chatId - The chat ID
+     * @param {string} reason - Reason for the handoff
+     * @param {Object} metadata - Additional metadata
+     * @returns {Promise<boolean>} Success status
+     */
+    async handoffToHuman(chatId, reason = '', metadata = {}) {
+        if (!this.ai) {
+            throw new Error('AI assistant is not initialized');
+        }
+        return await this.ai.handoffToHuman(chatId, reason, metadata);
+    }
+
+    /**
+     * Release a conversation back to the AI
+     * @param {string} chatId - The chat ID
+     * @param {string} summary - Summary of the human interaction
+     * @param {Object} metadata - Additional metadata
+     * @returns {Promise<boolean>} Success status
+     */
+    async releaseToAI(chatId, summary = '', metadata = {}) {
+        if (!this.ai) {
+            throw new Error('AI assistant is not initialized');
+        }
+        return await this.ai.releaseToAI(chatId, summary, metadata);
+    }
+
+    /**
+     * Check if a chat is in human mode
+     * @param {string} chatId - The chat ID
+     * @returns {boolean} Whether the chat is in human mode
+     */
+    isInHumanMode(chatId) {
+        if (!this.ai) {
+            return false;
+        }
+        return this.ai.isInHumanMode(chatId);
+    }
+
+    /**
+     * Get all chats currently in human mode
+     * @returns {Array<Object>} Array of handoff states
+     */
+    getHumanModeChats() {
+        if (!this.ai) {
+            return [];
+        }
+        return this.ai.getHumanModeChats();
+    }
+
+    /**
+     * Register human operator handlers
+     * @param {Object} handlers - Handler functions
+     * @param {Function} handlers.onHandoff - Called when a conversation is handed off to a human
+     * @param {Function} handlers.onMessage - Called when a message is received while in human mode
+     * @param {Function} handlers.onRelease - Called when a conversation is released back to the AI
+     */
+    registerHumanHandlers(handlers = {}) {
+        if (!this.ai) {
+            throw new Error('AI assistant is not initialized');
+        }
+        this.ai.registerHumanHandlers(handlers);
     }
 }
 

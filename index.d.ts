@@ -20,6 +20,12 @@ declare namespace WAWebJS {
         /** Client interactivity interface */
         interface?: InterfaceController
 
+        /** AI assistant */
+        ai: AIAssistant | null
+
+        /** Template parser */
+        templateParser: TemplateParser | null
+
         /**Accepts an invitation to join a group */
         acceptInvite(inviteCode: string): Promise<string>
 
@@ -407,6 +413,46 @@ declare namespace WAWebJS {
         on(event: 'vote_update', listener: (
             vote: PollVote
         ) => void): this
+
+        /**
+         * Process a message using templates and/or AI
+         * @param message Message to process
+         * @param options Processing options
+         */
+        processMessage(message: string, options?: ProcessMessageOptions): Promise<ProcessMessageResult>
+
+        /**
+         * Hand off a conversation to a human operator
+         * @param chatId The chat ID
+         * @param reason Reason for the handoff
+         * @param metadata Additional metadata
+         */
+        handoffToHuman(chatId: string, reason?: string, metadata?: any): Promise<boolean>;
+
+        /**
+         * Release a conversation back to the AI
+         * @param chatId The chat ID
+         * @param summary Summary of the human interaction
+         * @param metadata Additional metadata
+         */
+        releaseToAI(chatId: string, summary?: string, metadata?: any): Promise<boolean>;
+
+        /**
+         * Check if a chat is in human mode
+         * @param chatId The chat ID
+         */
+        isInHumanMode(chatId: string): boolean;
+
+        /**
+         * Get all chats currently in human mode
+         */
+        getHumanModeChats(): Array<HandoffState>;
+
+        /**
+         * Register human operator handlers
+         * @param handlers Handler functions
+         */
+        registerHumanHandlers(handlers: HumanHandlers): void;
     }
 
     /** Current connection information */
@@ -456,15 +502,15 @@ declare namespace WAWebJS {
         authTimeoutMs?: number,
         /** Puppeteer launch options. View docs here: https://github.com/puppeteer/puppeteer/ */
         puppeteer?: puppeteer.PuppeteerNodeLaunchOptions & puppeteer.ConnectOptions
-		/** Determines how to save and restore sessions. Will use LegacySessionAuth if options.session is set. Otherwise, NoAuth will be used. */
+        /** Determines how to save and restore sessions. Will use LegacySessionAuth if options.session is set. Otherwise, NoAuth will be used. */
         authStrategy?: AuthStrategy,
         /** The version of WhatsApp Web to use. Use options.webVersionCache to configure how the version is retrieved. */
         webVersion?: string,
         /**  Determines how to retrieve the WhatsApp Web version specified in options.webVersion. */
         webVersionCache?: WebCacheOptions,
         /** How many times should the qrcode be refreshed before giving up
-		 * @default 0 (disabled) */
-		qrMaxRetries?: number,
+         * @default 0 (disabled) */
+        qrMaxRetries?: number,
         /** 
          * @deprecated This option should be set directly on the LegacySessionAuth
          */
@@ -487,6 +533,10 @@ declare namespace WAWebJS {
         ffmpegPath?: string,
         /** Object with proxy autentication requirements @default: undefined */
         proxyAuthentication?: {username: string, password: string} | undefined
+        /** AI assistant configuration */
+        ai?: AIOptions
+        /** Template parser configuration */
+        templateParser?: TemplateParserOptions
     }
 
     export interface LocalWebCacheOptions {
@@ -1870,6 +1920,263 @@ declare namespace WAWebJS {
         aggregateEmoji: string,
         hasReactionByMe: boolean,
         senders: Array<Reaction>
+    }
+
+    export class AIAssistant extends Base {
+        constructor(client: Client, options?: AIOptions);
+        
+        config: AIConfig;
+        memory: MemoryConfig;
+        
+        ask(chatId: string, prompt: string, options?: AIRequestOptions): Promise<string>;
+        createThread(chatId: string): Promise<Thread>;
+        registerFunctions(functions: { [key: string]: Function }): void;
+        analyzeSentiment(text: string): Promise<SentimentResult>;
+        getSmartReplies(text: string, options?: SmartReplyOptions): Promise<string[]>;
+        detectLanguage(text: string): Promise<string>;
+        translate(text: string, targetLang: string): Promise<string>;
+
+        /**
+         * Register human operator handlers
+         * @param handlers Handler functions
+         */
+        registerHumanHandlers(handlers: HumanHandlers): this;
+
+        /**
+         * Hand off a conversation to a human operator
+         * @param chatId The chat ID
+         * @param reason Reason for the handoff
+         * @param metadata Additional metadata
+         */
+        handoffToHuman(chatId: string, reason?: string, metadata?: any): Promise<boolean>;
+
+        /**
+         * Release a conversation back to the AI
+         * @param chatId The chat ID
+         * @param summary Summary of the human interaction
+         * @param metadata Additional metadata
+         */
+        releaseToAI(chatId: string, summary?: string, metadata?: any): Promise<boolean>;
+
+        /**
+         * Check if a chat is in human mode
+         * @param chatId The chat ID
+         */
+        isInHumanMode(chatId: string): boolean;
+
+        /**
+         * Get all chats currently in human mode
+         */
+        getHumanModeChats(): Array<HandoffState>;
+
+        /**
+         * Process an incoming message with handoff awareness
+         * @param chatId The chat ID
+         * @param message The message content
+         * @param options Processing options
+         */
+        processMessage(chatId: string, message: string, options?: AIRequestOptions): Promise<HandoffProcessResult>;
+    }
+
+    export class Thread extends Base {
+        constructor(assistant: AIAssistant, chatId: string);
+        
+        chatId: string;
+        lastUsed: number;
+        
+        addContext(key: string, value: any): void;
+        getContext(): { [key: string]: any };
+        ask(prompt: string, options?: AIRequestOptions): Promise<string>;
+    }
+
+    export interface AIAssistantOptions {
+        provider?: 'openai';
+        apiKey?: string;
+        assistantId?: string;
+        defaultModel?: string;
+        temperature?: number;
+        maxTokens?: number;
+        memoryType?: 'session' | 'persistent';
+        storageProvider?: 'memory' | 'redis' | 'file';
+        ttl?: number;
+        maxThreads?: number;
+        options?: any;
+    }
+
+    export interface AIConfig {
+        provider: string;
+        apiKey: string;
+        assistantId: string;
+        defaultModel: string;
+        options: {
+            temperature: number;
+            maxTokens: number;
+            [key: string]: any;
+        };
+    }
+
+    export interface MemoryConfig {
+        type: 'session' | 'persistent';
+        provider: 'memory' | 'redis' | 'file';
+        ttl: number;
+        maxThreads: number;
+    }
+
+    export interface AIRequestOptions {
+        model?: string;
+        temperature?: number;
+        maxTokens?: number;
+        [key: string]: any;
+    }
+
+    export interface SentimentResult {
+        score: number;
+        text: string;
+        isPositive: boolean;
+        isNegative: boolean;
+        isNeutral: boolean;
+    }
+
+    export interface SmartReplyOptions {
+        maxSuggestions?: number;
+        threshold?: number;
+    }
+
+    export interface AIOptions {
+        /** Whether to enable the AI assistant */
+        enabled?: boolean;
+        /** AI provider to use */
+        provider?: string;
+        /** API key for the AI provider */
+        apiKey?: string;
+        /** Assistant ID for providers that support it */
+        assistantId?: string;
+        /** Default model to use */
+        defaultModel?: string;
+        /** Temperature for AI responses */
+        temperature?: number;
+        /** Maximum tokens for AI responses */
+        maxTokens?: number;
+        /** Memory type for AI threads */
+        memoryType?: 'session' | 'persistent';
+        /** Storage provider for AI threads */
+        storageProvider?: 'memory' | 'mongodb' | 'sql';
+        /** Time-to-live for threads in seconds */
+        ttl?: number;
+        /** Maximum number of threads to keep in memory */
+        maxThreads?: number;
+        /** Storage options for AI threads */
+        storageOptions?: any;
+        /** Additional provider-specific options */
+        options?: any;
+    }
+
+    export interface TemplateParserOptions {
+        /** Whether to enable the template parser */
+        enabled?: boolean;
+        /** Default templates to add */
+        defaultTemplates?: Record<string, TemplateDefinition>;
+    }
+
+    export interface TemplateDefinition {
+        /** Field definitions for the template */
+        fields: Record<string, TemplateFieldDefinition>;
+        /** Example messages for the template */
+        examples?: string[];
+    }
+
+    export interface TemplateFieldDefinition {
+        /** Field type */
+        type: 'string' | 'number' | 'boolean' | 'array';
+        /** Whether the field is required */
+        required: boolean;
+        /** Regular expression pattern for validation */
+        pattern?: string;
+        /** Custom validation function */
+        validate?: (value: any) => boolean;
+    }
+
+    export interface ProcessMessageOptions {
+        /** Template names to try */
+        templates?: string[];
+        /** Whether to fall back to AI if no template matches */
+        fallbackToAI?: boolean;
+        /** Options for AI processing */
+        aiOptions?: AIRequestOptions;
+        /** Chat ID for the conversation */
+        chatId?: string;
+        /** Whether to hand off to human on error */
+        handoffOnError?: boolean;
+        /** Whether to check handoff state */
+        checkHandoffState?: boolean;
+    }
+
+    export interface ProcessMessageResult {
+        /** Result type */
+        type: 'template' | 'ai' | 'human' | 'handoff' | 'unmatched';
+        /** Template name if type is 'template' */
+        template?: string;
+        /** Parsed data if type is 'template' */
+        data?: any;
+        /** AI response if type is 'ai' */
+        response?: string;
+        /** Original message */
+        message?: string;
+        /** Whether the message was handled by a human */
+        handled?: boolean;
+        /** Handoff state if applicable */
+        handoffState?: HandoffState;
+        /** Error message if applicable */
+        error?: string;
+    }
+
+    export interface HandoffState {
+        /** Whether the chat is in human mode */
+        isHumanMode: boolean;
+        /** Timestamp when the handoff occurred */
+        handoffTime: number;
+        /** Reason for the handoff */
+        reason: string;
+        /** Thread ID */
+        threadId: string;
+        /** Additional metadata */
+        metadata?: any;
+    }
+
+    export interface HumanHandlers {
+        /** Called when a conversation is handed off to a human */
+        onHandoff?: (chatId: string, thread: Thread, handoffState: HandoffState) => Promise<void>;
+        /** Called when a message is received while in human mode */
+        onMessage?: (chatId: string, message: string, handoffState: HandoffState) => Promise<HumanMessageResult>;
+        /** Called when a conversation is released back to the AI */
+        onRelease?: (chatId: string, thread: Thread, releaseInfo: ReleaseInfo) => Promise<void>;
+    }
+
+    export interface HumanMessageResult {
+        /** Whether the message was handled by the human handler */
+        handled: boolean;
+        /** Optional response to send back to the user */
+        response?: string;
+    }
+
+    export interface ReleaseInfo {
+        /** Summary of the human interaction */
+        summary?: string;
+        /** Additional metadata */
+        metadata?: any;
+    }
+
+    export interface HandoffProcessResult {
+        /** Result type */
+        type: 'ai' | 'human' | 'handoff';
+        /** Response message */
+        response?: string;
+        /** Whether the message was handled */
+        handled?: boolean;
+        /** Handoff state if applicable */
+        handoffState?: HandoffState;
+        /** Error message if applicable */
+        error?: string;
     }
 }
 

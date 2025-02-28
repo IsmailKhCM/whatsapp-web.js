@@ -2,32 +2,79 @@
 
 const Constants = require('./src/util/Constants');
 
+const Client = require('./src/Client');
+
+const {
+    MessageMedia,
+    Location,
+    Poll,
+    PollVote,
+    List,
+    Buttons,
+    Contact,
+    GroupNotification,
+    Label,
+    Call,
+    Reaction,
+    Message,
+    Chat,
+    PrivateChat,
+    GroupChat,
+    Broadcast,
+    BusinessContact,
+    PrivateContact
+} = require('./src/structures');
+
+const {
+    NoAuth,
+    LocalAuth,
+    RemoteAuth,
+    LegacySessionAuth
+} = require('./src/authStrategies');
+
+// Add AI components
+const AIAssistant = require('./src/structures/AIAssistant');
+const Thread = require('./src/structures/Thread');
+const TemplateParser = require('./src/structures/TemplateParser');
+const AIProvider = require('./src/structures/providers/AIProvider');
+const ThreadStorage = require('./src/structures/storage/ThreadStorage');
+
 module.exports = {
-    Client: require('./src/Client'),
+    Client,
+    MessageMedia,
+    Location,
+    Poll,
+    PollVote,
+    List,
+    Buttons,
+    Contact,
+    GroupNotification,
+    Label,
+    Call,
+    Reaction,
+    Message,
+    Chat,
+    PrivateChat,
+    GroupChat,
+    Broadcast,
+    BusinessContact,
+    PrivateContact,
+    NoAuth,
+    LocalAuth,
+    RemoteAuth,
+    LegacySessionAuth,
+    // Add AI exports
+    AIAssistant,
+    Thread,
+    TemplateParser,
+    AIProvider,
+    ThreadStorage,
     
     version: require('./package.json').version,
 
     // Structures
-    Chat: require('./src/structures/Chat'),
-    PrivateChat: require('./src/structures/PrivateChat'),
-    GroupChat: require('./src/structures/GroupChat'),
-    Message: require('./src/structures/Message'),
-    MessageMedia: require('./src/structures/MessageMedia'),
-    Contact: require('./src/structures/Contact'),
-    PrivateContact: require('./src/structures/PrivateContact'),
-    BusinessContact: require('./src/structures/BusinessContact'),
     ClientInfo: require('./src/structures/ClientInfo'),
-    Location: require('./src/structures/Location'),
-    Poll: require('./src/structures/Poll'),
     ProductMetadata: require('./src/structures/ProductMetadata'),
-    List: require('./src/structures/List'),
-    Buttons: require('./src/structures/Buttons'),
-    Broadcast: require('./src/structures/Broadcast'),
-    
-    // Auth Strategies
-    NoAuth: require('./src/authStrategies/NoAuth'),
-    LocalAuth: require('./src/authStrategies/LocalAuth'),
-    RemoteAuth: require('./src/authStrategies/RemoteAuth'),
     
     ...Constants
 };
